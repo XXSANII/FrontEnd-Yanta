@@ -1,7 +1,7 @@
-import { useTableSession } from '../hooks/useTableSession'
+import { useTableSession } from '../context/TableSessionContext'
 
 export default function TableBadge() {
-  const { tableLabel, sessionId } = useTableSession()
-  if (!tableLabel && !sessionId) return null
-  return <span className="table-badge">{tableLabel ? `โต๊ะ ${tableLabel}` : 'สั่งผ่าน QR โต๊ะ'}</span>
+  const { session } = useTableSession()
+  if (!session) return null
+  return <span className="table-badge">โต๊ะ {session.label}</span>
 }

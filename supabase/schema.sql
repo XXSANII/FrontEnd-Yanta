@@ -10,12 +10,25 @@ create table if not exists products (
   is_available boolean not null default true
 );
 
+-- โต๊ะจริง: QR ติดโต๊ะเก็บแค่ token (สุ่ม) ไม่ใช่เลขโต๊ะ
+create table if not exists tables (
+  id uuid primary key default gen_random_uuid(),
+  label text not null unique,
+  token text not null unique default replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''),
+  is_enabled boolean not null default true
+);
+
+-- session = ช่วงที่โต๊ะนั้นเปิดสั่งอาหาร; ปิดเมื่อพนักงานเช็กบิลหรือหมดอายุ
 create table if not exists table_sessions (
   id uuid primary key default gen_random_uuid(),
-  table_label text not null,
-  is_active boolean not null default true,
-  created_at timestamptz not null default now()
+  table_id uuid not null references tables(id),
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '4 hours',
+  closed_at timestamptz
 );
+-- มี session ที่ยังไม่ปิดได้แค่ 1 อันต่อโต๊ะ
+create unique index if not exists one_open_session_per_table
+  on table_sessions(table_id) where closed_at is null;
 
 create table if not exists orders (
   id uuid primary key default gen_random_uuid(),
@@ -37,7 +50,9 @@ create table if not exists order_items (
 );
 
 alter table products enable row level security;
+alter table tables enable row level security;
 alter table table_sessions enable row level security;
+-- ไม่มี policy บน tables / table_sessions / orders / order_items → ลูกค้าเข้าถึงได้เฉพาะผ่านฟังก์ชันด้านล่าง
 alter table orders enable row level security;
 alter table order_items enable row level security;
 
@@ -68,10 +83,22 @@ begin
     raise exception 'EMPTY_ORDER';
   end if;
 
-  if p_table_session_id is not null and not exists (
-    select 1 from table_sessions where id = p_table_session_id and is_active
+  if p_table_session_id is null then
+    raise exception 'SESSION_REQUIRED';
+  end if;
+
+  if not exists (
+    select 1 from table_sessions
+    where id = p_table_session_id and closed_at is null and expires_at > now()
   ) then
     raise exception 'SESSION_CLOSED';
+  end if;
+
+  -- กันยิงออเดอร์ถี่ผิดปกติ: ไม่เกิน 10 ออเดอร์/นาที/session
+  if (select count(*) from orders
+      where table_session_id = p_table_session_id
+        and created_at > now() - interval '1 minute') >= 10 then
+    raise exception 'RATE_LIMITED';
   end if;
 
   insert into orders (request_id, table_session_id, total_amount)
@@ -98,9 +125,43 @@ grant execute on function place_order(uuid, uuid, jsonb) to anon, authenticated;
 -- ให้ฝั่งร้านรับออเดอร์ใหม่แบบ realtime
 alter publication supabase_realtime add table orders;
 
--- คืนหมายเลขโต๊ะของเซสชันที่ยังเปิดอยู่ (ใช้แสดงผลหลังสแกน QR)
-create or replace function get_table_label(p_session_id uuid)
+-- สแกน QR: แลก token เป็น session (ใช้ session เดิมของโต๊ะถ้ายังเปิดอยู่)
+create or replace function open_table_session(p_token text)
+returns table (session_id uuid, table_label text)
+language plpgsql security definer set search_path = public as $$
+declare
+  v_table tables%rowtype;
+  v_session table_sessions%rowtype;
+begin
+  select * into v_table from tables where token = p_token and is_enabled;
+  if not found then raise exception 'INVALID_TOKEN'; end if;
+
+  -- ปิด session ที่หมดอายุแล้วของโต๊ะนี้ก่อน
+  update table_sessions set closed_at = now()
+  where table_id = v_table.id and closed_at is null and expires_at <= now();
+
+  select * into v_session from table_sessions
+  where table_id = v_table.id and closed_at is null;
+  if not found then
+    insert into table_sessions (table_id) values (v_table.id) returning * into v_session;
+  end if;
+  return query select v_session.id, v_table.label;
+end $$;
+
+-- ตรวจ session ที่เก็บไว้ในเครื่องลูกค้า: คืนเลขโต๊ะถ้ายังเปิดอยู่ ไม่งั้นคืน null
+create or replace function get_session_info(p_session_id uuid)
 returns text language sql security definer set search_path = public stable as $$
-  select table_label from table_sessions where id = p_session_id and is_active;
+  select t.label from table_sessions s join tables t on t.id = s.table_id
+  where s.id = p_session_id and s.closed_at is null and s.expires_at > now();
 $$;
-grant execute on function get_table_label(uuid) to anon, authenticated;
+
+-- พนักงานปิดโต๊ะตอนเช็กบิล (เรียกจากฝั่งร้านที่ล็อกอินแล้วเท่านั้น)
+create or replace function close_table_session(p_table_id uuid)
+returns void language sql security definer set search_path = public as $$
+  update table_sessions set closed_at = now()
+  where table_id = p_table_id and closed_at is null;
+$$;
+
+revoke all on function open_table_session(text), get_session_info(uuid), close_table_session(uuid) from public;
+grant execute on function open_table_session(text), get_session_info(uuid) to anon, authenticated;
+grant execute on function close_table_session(uuid) to authenticated;

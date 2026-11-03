@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import TableBadge from '../components/TableBadge'
 import { useCart } from '../context/CartContext'
-import { useTableSession } from '../hooks/useTableSession'
+import { useTableSession } from '../context/TableSessionContext'
 import { OrderError, submitOrder } from '../services/orderService'
 import { fetchProductsByIds } from '../services/productService'
 import { formatBaht, lineTotal } from '../utils/calculateTotal'
@@ -12,7 +12,9 @@ type Status = 'idle' | 'checking' | 'submitting' | 'done'
 export default function OrderReviewPage() {
   const { lines, count, total, sync, clear } = useCart()
   const navigate = useNavigate()
-  const { sessionId: tableSessionId, tableLabel } = useTableSession()
+  const { session, checking, canOrder, clearSession } = useTableSession()
+  const tableSessionId = session?.sessionId ?? null
+  const tableLabel = session?.label ?? null
   const [status, setStatus] = useState<Status>('checking')
   const [message, setMessage] = useState<string | null>(null)
   const [done, setDone] = useState<{ orderId: string; total: number } | null>(null)
@@ -41,7 +43,7 @@ export default function OrderReviewPage() {
   }, [])
 
   const unavailable = lines.filter((l) => !l.product.is_available)
-  const canConfirm = count > 0 && unavailable.length === 0 && status === 'idle'
+  const canConfirm = count > 0 && unavailable.length === 0 && status === 'idle' && canOrder && !checking
 
   const confirm = async () => {
     if (!canConfirm) return
@@ -54,6 +56,7 @@ export default function OrderReviewPage() {
       setStatus('done')
     } catch (e) {
       setStatus('idle')
+      if (e instanceof OrderError && e.sessionInvalid) clearSession()
       setMessage(
         e instanceof OrderError ? e.message : 'ส่งคำสั่งซื้อไม่สำเร็จ กรุณาลองอีกครั้ง',
       )
@@ -83,6 +86,15 @@ export default function OrderReviewPage() {
         <div className="title-row"><h1>ตรวจสอบรายการที่สั่ง</h1><TableBadge /></div>
       </header>
       <main>
+        {!canOrder && !checking && (
+          <div className="notice error">กรุณาสแกน QR ที่โต๊ะก่อนสั่งอาหาร</div>
+        )}
+        {tableLabel && (
+          <div className="table-confirm">
+            ส่งออเดอร์ไปที่ <strong>โต๊ะ {tableLabel}</strong>
+            <small>ไม่ใช่โต๊ะของคุณ? สแกน QR ที่โต๊ะอีกครั้ง</small>
+          </div>
+        )}
         {message && <div className="notice" role="alert">{message}</div>}
         {unavailable.length > 0 && (
           <div className="notice error">

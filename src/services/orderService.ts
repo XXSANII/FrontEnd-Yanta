@@ -3,7 +3,11 @@ import type { SubmitOrderInput, SubmitOrderResult } from '../types'
 import { cartTotal } from '../utils/calculateTotal'
 import { supabase } from './supabaseClient'
 
-export class OrderError extends Error {}
+export class OrderError extends Error {
+  constructor(message: string, readonly sessionInvalid = false) {
+    super(message)
+  }
+}
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -25,9 +29,12 @@ export async function submitOrder(input: SubmitOrderInput): Promise<SubmitOrderR
     })),
   })
   if (error) {
-    const known = ['SESSION_CLOSED', 'PRODUCT_UNAVAILABLE', 'EMPTY_ORDER']
+    const known = ['SESSION_CLOSED', 'SESSION_REQUIRED', 'RATE_LIMITED', 'PRODUCT_UNAVAILABLE', 'EMPTY_ORDER']
     if (known.some((k) => error.message.includes(k))) {
-      throw new OrderError(messageFor(error.message))
+      throw new OrderError(
+        messageFor(error.message),
+        /SESSION_(CLOSED|REQUIRED)/.test(error.message),
+      )
     }
     throw error
   }
@@ -36,7 +43,9 @@ export async function submitOrder(input: SubmitOrderInput): Promise<SubmitOrderR
 }
 
 function messageFor(raw: string) {
-  if (raw.includes('SESSION_CLOSED')) return 'โต๊ะนี้ปิดการสั่งอาหารแล้ว กรุณาติดต่อพนักงาน'
+  if (raw.includes('SESSION_CLOSED')) return 'โต๊ะนี้ปิดการสั่งอาหารแล้ว กรุณาสแกน QR ที่โต๊ะใหม่อีกครั้ง'
+  if (raw.includes('SESSION_REQUIRED')) return 'กรุณาสแกน QR ที่โต๊ะก่อนสั่งอาหาร'
+  if (raw.includes('RATE_LIMITED')) return 'สั่งถี่เกินไป กรุณารอสักครู่แล้วลองอีกครั้ง'
   if (raw.includes('PRODUCT_UNAVAILABLE')) return 'มีสินค้าบางรายการหมดหรือไม่พร้อมจำหน่าย กรุณาตรวจสอบตะกร้า'
   return 'ไม่สามารถส่งคำสั่งซื้อได้'
 }
