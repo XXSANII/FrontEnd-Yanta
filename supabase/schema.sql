@@ -43,7 +43,7 @@ create table if not exists orders (
 create table if not exists order_items (
   id uuid primary key default gen_random_uuid(),
   order_id uuid not null references orders(id) on delete cascade,
-  product_id uuid not null references products(id),
+  product_id uuid references products(id) on delete set null,  -- ลบเมนูได้ ประวัติยังอยู่ (เก็บชื่อ/ราคาไว้แล้ว)
   product_name text not null,
   quantity int not null check (quantity > 0),
   unit_price numeric(10,2) not null,
@@ -190,6 +190,20 @@ create policy "staff read tables" on tables for select to authenticated using (i
 create policy "staff read sessions" on table_sessions for select to authenticated using (is_staff());
 create policy "staff update products" on products for update to authenticated
   using (is_staff()) with check (is_staff());
+create policy "staff insert products" on products for insert to authenticated with check (is_staff());
+create policy "staff delete products" on products for delete to authenticated using (is_staff());
+
+-- รูปสินค้า: bucket สาธารณะ (ลูกค้าอ่านได้) / เฉพาะพนักงานอัปโหลด-แก้-ลบ
+insert into storage.buckets (id, name, public) values ('product-images', 'product-images', true)
+  on conflict (id) do nothing;
+create policy "public read product images" on storage.objects for select
+  using (bucket_id = 'product-images');
+create policy "staff write product images" on storage.objects for insert to authenticated
+  with check (bucket_id = 'product-images' and is_staff());
+create policy "staff update product images" on storage.objects for update to authenticated
+  using (bucket_id = 'product-images' and is_staff());
+create policy "staff delete product images" on storage.objects for delete to authenticated
+  using (bucket_id = 'product-images' and is_staff());
 
 -- พนักงานเปลี่ยนได้แค่สถานะ (ไม่ให้แก้ยอดเงิน/โต๊ะ)
 revoke update on orders from authenticated;
