@@ -34,7 +34,8 @@ create table if not exists orders (
   id uuid primary key default gen_random_uuid(),
   request_id uuid not null unique,            -- idempotency key
   table_session_id uuid references table_sessions(id),
-  status text not null default 'pending',
+  status text not null default 'pending'
+    check (status in ('pending','preparing','served','cancelled')),
   total_amount numeric(10,2) not null,
   created_at timestamptz not null default now()
 );
@@ -159,9 +160,40 @@ $$;
 create or replace function close_table_session(p_table_id uuid)
 returns void language sql security definer set search_path = public as $$
   update table_sessions set closed_at = now()
-  where table_id = p_table_id and closed_at is null;
+  where table_id = p_table_id and closed_at is null and is_staff();
 $$;
 
 revoke all on function open_table_session(text), get_session_info(uuid), close_table_session(uuid) from public;
 grant execute on function open_table_session(text), get_session_info(uuid) to anon, authenticated;
 grant execute on function close_table_session(uuid) to authenticated;
+
+
+-- ===================== ฝั่งร้านค้า (apps/staff) =====================
+-- พนักงาน = ผู้ใช้ Supabase Auth ที่อยู่ในตารางนี้ (เพิ่มด้วยมือ/SQL โดยเจ้าของร้าน)
+create table if not exists staff_users (
+  user_id uuid primary key references auth.users(id) on delete cascade
+);
+alter table staff_users enable row level security;
+
+create or replace function is_staff()
+returns boolean language sql security definer set search_path = public stable as $$
+  select exists (select 1 from staff_users where user_id = auth.uid());
+$$;
+grant execute on function is_staff() to anon, authenticated;
+
+-- policy เฉพาะพนักงาน (ลูกค้าเป็น anon จึงไม่ผ่านเงื่อนไข is_staff())
+create policy "staff read orders" on orders for select to authenticated using (is_staff());
+create policy "staff update order status" on orders for update to authenticated
+  using (is_staff()) with check (is_staff());
+create policy "staff read order_items" on order_items for select to authenticated using (is_staff());
+create policy "staff read tables" on tables for select to authenticated using (is_staff());
+create policy "staff read sessions" on table_sessions for select to authenticated using (is_staff());
+create policy "staff update products" on products for update to authenticated
+  using (is_staff()) with check (is_staff());
+
+-- พนักงานเปลี่ยนได้แค่สถานะ (ไม่ให้แก้ยอดเงิน/โต๊ะ)
+revoke update on orders from authenticated;
+grant update (status) on orders to authenticated;
+
+-- เพิ่มพนักงานคนแรก (แทน <user-uuid> ด้วย id จากหน้า Authentication):
+--   insert into staff_users(user_id) values ('<user-uuid>');

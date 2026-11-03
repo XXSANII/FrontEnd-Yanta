@@ -1,4 +1,4 @@
-import { CATEGORIES } from '../data/categories'
+import { CATEGORIES } from '@yanta/shared'
 import type { CategoryId } from '../types'
 
 interface Props {
