@@ -8,7 +8,6 @@ h1 { margin:0 0 16px; font-size:1.4rem; } h2 { margin:0 0 10px; font-size:1.05re
 .nav { display:flex; align-items:center; gap:18px; padding:12px 24px; background:var(--brand); color:#fff; flex-wrap:wrap; }
 .nav a { color:#cfe0e1; text-decoration:none; padding:4px 2px; } .nav a.active { color:#fff; border-bottom:2px solid #fff; }
 .nav .link { margin-left:auto; background:none; color:#cfe0e1; }
-.mock { background:#e8b04a; color:#222; font-size:.7rem; padding:2px 8px; border-radius:999px; font-weight:700; }
 .content { padding:24px; max-width:1200px; margin:0 auto; }
 .primary { background:var(--brand); color:#fff; padding:9px 18px; border-radius:10px; font-weight:600; }
 .ghost { background:#fff; border:1px solid var(--line); padding:8px 14px; border-radius:10px; margin-right:6px; }

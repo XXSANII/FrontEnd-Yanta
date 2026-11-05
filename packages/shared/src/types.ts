@@ -1,4 +1,4 @@
-/** id ของหมวดหมู่ (uuid จาก Backend; mock mode ใช้ slug) */
+/** id ของหมวดหมู่ (uuid จาก Backend) */
 export type CategoryId = string
 
 export interface Category {

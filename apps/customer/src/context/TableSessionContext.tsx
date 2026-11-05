@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { fetchSessionLabel, type TableSession } from '../services/tableService'
-import { isMockMode } from '../services/apiClient'
 
 const KEY = 'table_session_v3'
 
@@ -8,7 +7,7 @@ interface Value {
   session: TableSession | null
   /** กำลังตรวจ session ที่เก็บไว้กับเซิร์ฟเวอร์ */
   checking: boolean
-  /** ใน production ต้องมี session ที่เปิดอยู่ถึงสั่งได้ */
+  /** ต้องมี session ที่เปิดอยู่ถึงสั่งได้ */
   canOrder: boolean
   setSession: (s: TableSession) => void
   clearSession: () => void
@@ -49,7 +48,7 @@ export function TableSessionProvider({ children }: { children: ReactNode }) {
   }, [setSession, clearSession])
 
   const value = useMemo<Value>(
-    () => ({ session, checking, canOrder: isMockMode || session !== null, setSession, clearSession }),
+    () => ({ session, checking, canOrder: session !== null, setSession, clearSession }),
     [session, checking, setSession, clearSession],
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
