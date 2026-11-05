@@ -1,15 +1,15 @@
-import { CATEGORIES } from '@yanta/shared'
-import type { CategoryId } from '../types'
+import type { Category, CategoryId } from '../types'
 
 interface Props {
-  active: CategoryId
+  categories: Category[]
+  active: CategoryId | null
   onChange: (id: CategoryId) => void
 }
 
-export default function CategoryTabs({ active, onChange }: Props) {
+export default function CategoryTabs({ categories, active, onChange }: Props) {
   return (
     <nav className="tabs" role="tablist" aria-label="ประเภทอาหาร">
-      {CATEGORIES.map((c) => (
+      {categories.map((c) => (
         <button
           key={c.id}
           role="tab"

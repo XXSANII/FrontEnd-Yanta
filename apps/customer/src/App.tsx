@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom'
 import CartPage from './pages/CartPage'
 import MenuPage from './pages/MenuPage'
 import OrderReviewPage from './pages/OrderReviewPage'
+import OrdersPage from './pages/OrdersPage'
 import TableEntryPage from './pages/TableEntryPage'
 
 export default function App() {
@@ -11,6 +12,7 @@ export default function App() {
       <Route path="/t/:token" element={<TableEntryPage />} />
       <Route path="/cart" element={<CartPage />} />
       <Route path="/review" element={<OrderReviewPage />} />
+      <Route path="/orders" element={<OrdersPage />} />
       <Route path="*" element={<MenuPage />} />
     </Routes>
   )

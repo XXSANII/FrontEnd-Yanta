@@ -1,159 +1,117 @@
-import type { CategoryId, Order, OrderStatus, Product } from '@yanta/shared'
-import { mockOrders, mockProducts, mockTables, type StaffTable } from './mockData'
+import {
+  ApiError,
+  mapCategory, mapOptionGroup, mapOrder, mapProduct, newId,
+  type Category, type CategoryDto, type OptionGroup, type OptionGroupDto, type OptionKind, type Order, type OrderDto, type OrderStatus, type Product, type ProductDto,
+} from '@yanta/shared'
+import { api } from './apiClient'
 import { supabase } from './supabaseClient'
 
-export type { StaffTable }
+export interface Me { userId: string; role: string; isAdmin: boolean; permissions: string[] }
 
-// ---------- orders ----------
+export const fetchMe = () => api<Me>('/api/auth/me')
+
+// ---------- ออเดอร์ ----------
 export async function fetchOrders(): Promise<Order[]> {
-  if (!supabase) return [...mockOrders].sort((a, b) => b.created_at.localeCompare(a.created_at))
-  const { data, error } = await supabase
-    .from('orders')
-    .select('id, status, total_amount, created_at, order_items(*), table_sessions(tables(label))')
-    .order('created_at', { ascending: false })
-    .limit(100)
-  if (error) throw error
-  return (data ?? []).map((r: any) => ({
-    id: r.id,
-    status: r.status,
-    total_amount: Number(r.total_amount),
-    created_at: r.created_at,
-    table_label: r.table_sessions?.tables?.label ?? null,
-    items: (r.order_items ?? []).map((i: any) => ({
-      ...i,
-      unit_price: Number(i.unit_price),
-      subtotal: Number(i.subtotal),
-    })),
-  }))
+  return (await api<OrderDto[]>('/api/orders')).map(mapOrder)
+}
+export const updateOrderStatus = (id: string, status: OrderStatus) =>
+  api(`/api/orders/${id}/status`, { method: 'PATCH', body: { status } })
+export const payOrder = (id: string) => api(`/api/orders/${id}/pay`, { method: 'POST' })
+
+// ---------- โต๊ะ / session ----------
+export interface StaffTable { id: string; label: string; token: string; isActive: boolean }
+export interface StaffSession {
+  id: string; tableId: string; status: 'active' | 'closing' | 'closed'
+  billRequestedAt: string | null; totalAmount: number; unpaidAmount: number
 }
 
-/** แจ้งเมื่อมีออเดอร์ใหม่/เปลี่ยนสถานะ (Supabase Realtime) คืนฟังก์ชันยกเลิก */
-export function subscribeOrders(onChange: () => void): () => void {
-  if (!supabase) return () => {}
-  const channel = supabase
-    .channel('orders-changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, onChange)
-    .subscribe()
-  return () => { supabase!.removeChannel(channel) }
-}
-
-export async function updateOrderStatus(id: string, status: OrderStatus): Promise<void> {
-  if (!supabase) {
-    const o = mockOrders.find((x) => x.id === id)
-    if (o) o.status = status
-    return
-  }
-  const { error } = await supabase.from('orders').update({ status }).eq('id', id)
-  if (error) throw error
-}
-
-// ---------- tables ----------
 export async function fetchTables(): Promise<StaffTable[]> {
-  if (!supabase) return mockTables.map((t) => ({ ...t }))
-  const { data, error } = await supabase
-    .from('tables')
-    .select('id, label, token, table_sessions(closed_at, expires_at)')
-    .eq('is_enabled', true)
-    .order('label')
-  if (error) throw error
-  const now = Date.now()
-  return (data ?? []).map((t: any) => ({
-    id: t.id,
-    label: t.label,
-    token: t.token,
-    hasOpenSession: (t.table_sessions ?? []).some(
-      (s: any) => !s.closed_at && new Date(s.expires_at).getTime() > now,
-    ),
-  }))
+  const rows = await api<{ id: string; tableNumber: string; qrCodeToken: string; isActive: boolean }[]>('/api/tables')
+  return rows.map((t) => ({ id: t.id, label: t.tableNumber, token: t.qrCodeToken, isActive: t.isActive }))
 }
-
-export async function closeTable(tableId: string): Promise<void> {
-  if (!supabase) {
-    const t = mockTables.find((x) => x.id === tableId)
-    if (t) t.hasOpenSession = false
-    return
-  }
-  const { error } = await supabase.rpc('close_table_session', { p_table_id: tableId })
-  if (error) throw error
+export async function fetchOpenSessions(): Promise<StaffSession[]> {
+  const rows = await api<StaffSession[]>('/api/sessions')
+  return rows.map((s) => ({ ...s, totalAmount: Number(s.totalAmount), unpaidAmount: Number(s.unpaidAmount) }))
 }
+export const createTable = (tableNumber: string) =>
+  api('/api/tables', { method: 'POST', body: { tableNumber, isActive: true } })
+export const paySession = (id: string) => api(`/api/sessions/${id}/pay`, { method: 'POST' })
+export const closeSession = (id: string) => api(`/api/sessions/${id}/close`, { method: 'POST' })
 
-// ---------- menu ----------
-export async function fetchProducts(): Promise<Product[]> {
-  if (!supabase) return mockProducts.map((p) => ({ ...p }))
-  const { data, error } = await supabase
-    .from('products')
-    .select('id, category, name, description, price, image_url, is_available')
-    .order('name')
-  if (error) throw error
-  return (data ?? []).map((r) => ({ ...r, price: Number(r.price) })) as Product[]
-}
-
-export async function setAvailability(id: string, is_available: boolean): Promise<void> {
-  if (!supabase) {
-    const p = mockProducts.find((x) => x.id === id)
-    if (p) p.is_available = is_available
-    return
-  }
-  const { error } = await supabase.from('products').update({ is_available }).eq('id', id)
-  if (error) throw error
-}
-
+// ---------- เมนู ----------
 export interface ProductInput {
   name: string
   description: string | null
   price: number
-  category: CategoryId
+  category: string
   image_url: string | null
   is_available: boolean
+  /** ถ้าตั้งค่า = สร้างประเภทใหม่ด้วยชื่อนี้ก่อน แล้วใช้ประเภทนั้นกับเมนู (ไม่สนใจ category) */
+  new_category_name?: string
+  /** ถ้าตั้งค่า = แทนที่ชุดตัวเลือกที่ผูกกับเมนูทั้งหมด; ไม่ส่ง = ไม่เปลี่ยน */
+  option_group_ids?: string[]
 }
+const toBody = (i: ProductInput) => ({
+  categoryId: i.category, name: i.name, description: i.description,
+  price: i.price, imageUrl: i.image_url, isAvailable: i.is_available,
+  optionGroupIds: i.option_group_ids,
+})
 
-export async function createProduct(input: ProductInput): Promise<Product> {
-  if (!supabase) {
-    const p: Product = { id: `p${Date.now()}`, ...input }
-    mockProducts.push(p)
-    return { ...p }
-  }
-  const { data, error } = await supabase.from('products').insert(input).select().single()
-  if (error) throw error
-  return { ...data, price: Number(data.price) } as Product
+export const createCategory = (name: string, sortOrder: number) =>
+  api<CategoryDto>('/api/categories', { method: 'POST', body: { name, description: null, sortOrder } })
+export const fetchCategories = async (): Promise<Category[]> =>
+  (await api<CategoryDto[]>('/api/categories')).map(mapCategory)
+export const fetchProducts = async (): Promise<Product[]> =>
+  (await api<ProductDto[]>('/api/products/all')).map(mapProduct)
+export const createProduct = (i: ProductInput) => api('/api/products', { method: 'POST', body: toBody(i) })
+export const updateProduct = (id: string, i: ProductInput) => api(`/api/products/${id}`, { method: 'PUT', body: toBody(i) })
+export const setAvailability = (id: string, isAvailable: boolean) =>
+  api(`/api/products/${id}/availability`, { method: 'PATCH', body: { isAvailable } })
+export const deleteProduct = (id: string) => api(`/api/products/${id}`, { method: 'DELETE' })
+
+// ---------- ชุดตัวเลือก ----------
+export type StaffOptionGroup = OptionGroup & { sort_order: number }
+export interface OptionGroupInput {
+  name: string
+  kind: OptionKind
+  is_required: boolean
+  sort_order: number
+  options: { id?: string; name: string; price_delta: number; is_available: boolean }[]
 }
-
-export async function updateProduct(id: string, input: ProductInput): Promise<void> {
-  if (!supabase) {
-    const i = mockProducts.findIndex((x) => x.id === id)
-    if (i >= 0) mockProducts[i] = { id, ...input }
-    return
-  }
-  const { error } = await supabase.from('products').update(input).eq('id', id)
-  if (error) throw error
+const toGroupBody = (i: OptionGroupInput) => ({
+  name: i.name, kind: i.kind, isRequired: i.is_required, sortOrder: i.sort_order,
+  options: i.options.map((o, idx) => ({
+    id: o.id, name: o.name, priceDelta: o.price_delta, isAvailable: o.is_available, sortOrder: idx,
+  })),
+})
+export async function fetchOptionGroups(): Promise<StaffOptionGroup[]> {
+  return (await api<OptionGroupDto[]>('/api/option-groups'))
+    .map((g) => ({ ...mapOptionGroup(g), sort_order: g.sortOrder }))
+    .sort((a, b) => a.sort_order - b.sort_order)
 }
+export const createOptionGroup = (i: OptionGroupInput) => api('/api/option-groups', { method: 'POST', body: toGroupBody(i) })
+export const updateOptionGroup = (id: string, i: OptionGroupInput) =>
+  api(`/api/option-groups/${id}`, { method: 'PUT', body: toGroupBody(i) })
+export const deleteOptionGroup = (id: string) => api(`/api/option-groups/${id}`, { method: 'DELETE' })
 
-export async function deleteProduct(id: string): Promise<void> {
-  if (!supabase) {
-    const i = mockProducts.findIndex((x) => x.id === id)
-    if (i >= 0) mockProducts.splice(i, 1)
-    return
-  }
-  const { error } = await supabase.from('products').delete().eq('id', id)
-  if (error) throw error
-}
-
-/** อัปโหลดรูปไป Storage แล้วคืน public URL (mock: คืน data URL) */
+/** อัปโหลดรูปไป Supabase Storage แล้วคืน public URL */
 export async function uploadProductImage(file: File): Promise<string> {
-  if (!supabase) {
-    return new Promise((resolve, reject) => {
-      const r = new FileReader()
-      r.onload = () => resolve(r.result as string)
-      r.onerror = reject
-      r.readAsDataURL(file)
-    })
-  }
+  if (!supabase) throw new Error('Supabase ไม่ได้ตั้งค่า')
   const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
-  const path = `${crypto.randomUUID()}.${ext}`
-  const { error } = await supabase.storage.from('product-images').upload(path, file, {
-    contentType: file.type,
-    cacheControl: '31536000',
-  })
+  const path = `${newId()}.${ext}`
+  const bucket = supabase.storage.from('menu-images')
+  const { error } = await bucket.upload(path, file, { contentType: file.type, cacheControl: '31536000' })
   if (error) throw error
-  return supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl
+  return bucket.getPublicUrl(path).data.publicUrl
+}
+
+/** อธิบายสาเหตุที่เรียก Backend ไม่สำเร็จ ให้พนักงาน/ผู้ดูแลอ่านแล้วรู้ว่าต้องแก้ตรงไหน */
+export function describeError(e: unknown, what: string): string {
+  if (e instanceof ApiError) {
+    if (e.status === 0) return `${what}: ต่อ Backend ไม่ได้ (Backend ไม่ได้เปิด หรือ CORS ไม่อนุญาตพอร์ตนี้)`
+    if (e.status === 401) return `${what}: Backend ไม่ยอมรับ token (401) — ลองออกจากระบบแล้วล็อกอินใหม่ หรือตรวจ Supabase:Url ของ Backend`
+    if (e.status === 403) return `${what}: บัญชีนี้ไม่มีสิทธิ์ (403)`
+    return `${what}: ${e.message} (${e.status})`
+  }
+  return what
 }

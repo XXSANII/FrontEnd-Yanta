@@ -7,12 +7,26 @@ interface Props {
   product: Product
   quantity: number
   onAdd: () => void
+  onOpen: () => void
 }
 
-export default function ProductCard({ product, quantity, onAdd }: Props) {
+export default function ProductCard({ product, quantity, onAdd, onOpen }: Props) {
   const soldOut = !product.is_available
   return (
-    <article className={`card${soldOut ? ' sold-out' : ''}`}>
+    <article
+      className={`card${soldOut ? ' sold-out' : ' clickable'}`}
+      onClick={soldOut ? undefined : onOpen}
+      onKeyDown={(e) => {
+        if (soldOut || e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      tabIndex={soldOut ? undefined : 0}
+      role={soldOut ? undefined : 'button'}
+      aria-label={soldOut ? undefined : `ดูตัวเลือก ${product.name}`}
+    >
       <div className="card-img">
         <img
           src={product.image_url || PLACEHOLDER}
@@ -31,7 +45,10 @@ export default function ProductCard({ product, quantity, onAdd }: Props) {
           <span className="price">{formatBaht(product.price)}</span>
           <button
             className="add-btn"
-            onClick={onAdd}
+            onClick={(e) => {
+              e.stopPropagation()
+              onAdd()
+            }}
             disabled={soldOut}
             aria-label={`เพิ่ม ${product.name}`}
           >

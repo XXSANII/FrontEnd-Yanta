@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { fetchSessionLabel, type TableSession } from '../services/tableService'
-import { isMockMode } from '../services/supabaseClient'
+import { isMockMode } from '../services/apiClient'
 
-const KEY = 'table_session_v2'
+const KEY = 'table_session_v3'
 
 interface Value {
   session: TableSession | null
@@ -19,7 +19,7 @@ const Ctx = createContext<Value | null>(null)
 function load(): TableSession | null {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? 'null')
-    return raw?.sessionId && raw?.label ? raw : null
+    return raw?.sessionId && raw?.label && raw?.token ? raw : null
   } catch {
     return null
   }
@@ -42,9 +42,9 @@ export function TableSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const saved = load()
     if (!saved) return
-    fetchSessionLabel(saved.sessionId, saved.label)
-      .then((label) => (label ? setSession({ sessionId: saved.sessionId, label }) : clearSession()))
-      .catch(() => { /* ออฟไลน์: คงค่าเดิม ตัวตัดสินจริงคือ place_order */ })
+    fetchSessionLabel(saved)
+      .then((label) => (label ? setSession({ ...saved, label }) : clearSession()))
+      .catch(() => { /* ออฟไลน์: คงค่าเดิม ตัวตัดสินจริงคือตอนส่งออเดอร์ */ })
       .finally(() => setChecking(false))
   }, [setSession, clearSession])
 

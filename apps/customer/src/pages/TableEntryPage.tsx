@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTableSession } from '../context/TableSessionContext'
 import { InvalidTableError, openTableSession } from '../services/tableService'
 
-/** /t/:token — หน้าที่ QR ประจำโต๊ะเปิด: แลก token เป็น session แล้วล้าง token ออกจาก URL */
+/** /t/:token — QR ประจำโต๊ะเปิดหน้านี้: แลก qrToken เป็น session แล้วล้าง token ออกจาก URL */
 export default function TableEntryPage() {
   const { token = '' } = useParams()
   const navigate = useNavigate()
@@ -20,9 +20,11 @@ export default function TableEntryPage() {
       })
       .catch((e) => {
         if (cancelled) return
-        setError(e instanceof InvalidTableError
-          ? 'QR นี้ใช้งานไม่ได้ กรุณาติดต่อพนักงาน'
-          : 'เชื่อมต่อไม่สำเร็จ กรุณาสแกน QR ใหม่อีกครั้ง')
+        setError(
+          e instanceof InvalidTableError
+            ? 'QR นี้ใช้งานไม่ได้ กรุณาติดต่อพนักงาน'
+            : 'เชื่อมต่อไม่สำเร็จ กรุณาสแกน QR ใหม่อีกครั้ง',
+        )
       })
     return () => { cancelled = true }
   }, [token, navigate, setSession])

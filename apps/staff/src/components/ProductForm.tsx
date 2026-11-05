@@ -1,8 +1,10 @@
-import { CATEGORIES, type CategoryId, type Product } from '@yanta/shared'
+import type { Category, CategoryId, Product } from '@yanta/shared'
 import { useState, type FormEvent } from 'react'
-import { uploadProductImage, type ProductInput } from '../services/staffService'
+import { uploadProductImage, type ProductInput, type StaffOptionGroup } from '../services/staffService'
 
 interface Props {
+  categories: Category[]
+  optionGroups: StaffOptionGroup[]
   product: Product | null // null = เพิ่มเมนูใหม่
   defaultCategory: CategoryId
   onSave: (input: ProductInput) => Promise<void>
@@ -11,14 +13,17 @@ interface Props {
 }
 
 const MAX_IMAGE_MB = 3
+const NEW = '__new' // ค่าพิเศษของ dropdown = สร้างประเภทใหม่
 
-export default function ProductForm({ product, defaultCategory, onSave, onDelete, onClose }: Props) {
+export default function ProductForm({ categories, optionGroups, product, defaultCategory, onSave, onDelete, onClose }: Props) {
   const [name, setName] = useState(product?.name ?? '')
   const [description, setDescription] = useState(product?.description ?? '')
   const [price, setPrice] = useState(product ? String(product.price) : '')
-  const [category, setCategory] = useState<CategoryId>(product?.category ?? defaultCategory)
+  const [category, setCategory] = useState<CategoryId>(product?.category ?? (defaultCategory || NEW))
+  const [newCategory, setNewCategory] = useState('')
   const [imageUrl, setImageUrl] = useState(product?.image_url ?? '')
   const [available, setAvailable] = useState(product?.is_available ?? true)
+  const [groupIds, setGroupIds] = useState<string[]>(() => (product?.option_groups ?? []).map((g) => g.id))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -37,6 +42,8 @@ export default function ProductForm({ product, defaultCategory, onSave, onDelete
     const priceNum = Number(price)
     if (!name.trim()) return setError('กรุณากรอกชื่อเมนู')
     if (price === '' || !Number.isFinite(priceNum) || priceNum < 0) return setError('กรุณากรอกราคาให้ถูกต้อง (0 ขึ้นไป)')
+    const creating = category === NEW
+    if (creating && !newCategory.trim()) return setError('กรุณากรอกชื่อประเภทใหม่')
     setBusy(true)
     setError(null)
     try {
@@ -44,12 +51,14 @@ export default function ProductForm({ product, defaultCategory, onSave, onDelete
         name: name.trim(),
         description: description.trim() || null,
         price: Math.round(priceNum * 100) / 100,
-        category,
+        category: creating ? '' : category,
+        new_category_name: creating ? newCategory.trim() : undefined,
         image_url: imageUrl.trim() || null,
         is_available: available,
+        option_group_ids: groupIds,
       })
-    } catch {
-      setError('บันทึกไม่สำเร็จ กรุณาลองอีกครั้ง')
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : 'บันทึกไม่สำเร็จ กรุณาลองอีกครั้ง')
       setBusy(false)
     }
   }
@@ -57,7 +66,7 @@ export default function ProductForm({ product, defaultCategory, onSave, onDelete
   const remove = async () => {
     if (!onDelete || !confirm(`ลบเมนู "${product?.name}" ถาวร? (ประวัติออเดอร์เดิมยังอยู่)`)) return
     setBusy(true)
-    try { await onDelete() } catch { setError('ลบไม่สำเร็จ'); setBusy(false) }
+    try { await onDelete() } catch (e) { setError(e instanceof Error && e.message ? e.message : 'ลบไม่สำเร็จ'); setBusy(false) }
   }
 
   return (
@@ -72,10 +81,16 @@ export default function ProductForm({ product, defaultCategory, onSave, onDelete
           </label>
           <label>ประเภท
             <select value={category} onChange={(e) => setCategory(e.target.value as CategoryId)}>
-              {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <option value={NEW}>+ เพิ่มประเภทใหม่…</option>
             </select>
           </label>
         </div>
+        {category === NEW && (
+          <label>ชื่อประเภทใหม่ *
+            <input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="เช่น ของหวาน" autoFocus />
+          </label>
+        )}
         <label>รายละเอียด
           <textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
         </label>
@@ -93,6 +108,22 @@ export default function ProductForm({ product, defaultCategory, onSave, onDelete
           <input type="checkbox" checked={available} onChange={(e) => setAvailable(e.target.checked)} />
           พร้อมขาย
         </label>
+
+        {optionGroups.length > 0 && (
+          <div className="og-check">
+            <strong>ชุดตัวเลือกที่ใช้กับเมนูนี้</strong>
+            {optionGroups.map((g) => (
+              <label className="switch" key={g.id}>
+                <input
+                  type="checkbox" checked={groupIds.includes(g.id)}
+                  onChange={(e) => setGroupIds((l) => (e.target.checked ? [...l, g.id] : l.filter((x) => x !== g.id)))}
+                />
+                {g.name}
+              </label>
+            ))}
+            <small className="muted">สร้าง/แก้ไขชุดตัวเลือกได้ที่ส่วน "ชุดตัวเลือก" ด้านล่างของหน้าเมนู</small>
+          </div>
+        )}
 
         {error && <div className="notice error">{error}</div>}
         <div className="modal-actions">

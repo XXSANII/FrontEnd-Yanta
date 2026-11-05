@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { newId } from '@yanta/shared'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import TableBadge from '../components/TableBadge'
 import { useCart } from '../context/CartContext'
 import { useTableSession } from '../context/TableSessionContext'
 import { OrderError, submitOrder } from '../services/orderService'
 import { fetchProductsByIds } from '../services/productService'
-import { formatBaht, lineTotal } from '../utils/calculateTotal'
+import { invalidReasonText, syncLines } from '../utils/syncLines'
+import { describeOptions } from '../components/CartItem'
+import { formatBaht, lineTotal, unitPrice } from '../utils/calculateTotal'
 
 type Status = 'idle' | 'checking' | 'submitting' | 'done'
 
@@ -13,13 +16,10 @@ export default function OrderReviewPage() {
   const { lines, count, total, sync, clear } = useCart()
   const navigate = useNavigate()
   const { session, checking, canOrder, clearSession } = useTableSession()
-  const tableSessionId = session?.sessionId ?? null
   const tableLabel = session?.label ?? null
   const [status, setStatus] = useState<Status>('checking')
   const [message, setMessage] = useState<string | null>(null)
   const [done, setDone] = useState<{ orderId: string; total: number } | null>(null)
-  // request id คงเดิมทุกครั้งที่ retry เพื่อกันออเดอร์ซ้ำ
-  const requestId = useRef(crypto.randomUUID())
 
   // ตรวจราคา/สถานะล่าสุดจากฐานข้อมูลก่อนให้ลูกค้ายืนยัน
   useEffect(() => {
@@ -28,9 +28,16 @@ export default function OrderReviewPage() {
     if (ids.length === 0) return setStatus('idle')
     fetchProductsByIds(ids)
       .then((fresh) => {
-        const changed = lines.some((l) => {
-          const f = fresh.find((p) => p.id === l.product.id)
-          return !f || f.price !== l.product.price || f.is_available !== l.product.is_available
+        // เทียบด้วยผลของ sync จริง: ราคาต่อหน่วย (รวมตัวเลือก) / สถานะ / ชุดตัวเลือก
+        const next = syncLines(lines, fresh)
+        const changed = lines.some((l, i) => {
+          const n = next[i]
+          return (
+            unitPrice(n) !== unitPrice(l) ||
+            n.product.is_available !== l.product.is_available ||
+            n.invalidReason !== l.invalidReason ||
+            n.options.map((o) => o.id).join() !== l.options.map((o) => o.id).join()
+          )
         })
         if (changed) {
           sync(fresh)
@@ -50,13 +57,23 @@ export default function OrderReviewPage() {
     setStatus('submitting')
     setMessage(null)
     try {
-      const res = await submitOrder({ lines, tableSessionId, requestId: requestId.current })
+      const res = await submitOrder({
+        lines,
+        tableSessionId: session?.sessionId ?? null,
+        sessionToken: session?.token ?? null,
+        requestId: newId(),
+      })
       clear() // ล้างตะกร้าหลังบันทึกสำเร็จเท่านั้น
       setDone({ orderId: res.orderId, total: res.totalAmount })
       setStatus('done')
     } catch (e) {
       setStatus('idle')
       if (e instanceof OrderError && e.sessionInvalid) clearSession()
+      else if (e instanceof OrderError) {
+        // 409 ตัวเลือก/เมนูไม่พร้อมขาย: ดึงข้อมูลล่าสุดมา sync เพื่อให้บรรทัดที่มีปัญหาถูกทำเครื่องหมาย
+        const ids = lines.map((l) => l.product.id)
+        fetchProductsByIds(ids).then(sync).catch(() => {})
+      }
       setMessage(
         e instanceof OrderError ? e.message : 'ส่งคำสั่งซื้อไม่สำเร็จ กรุณาลองอีกครั้ง',
       )
@@ -70,10 +87,11 @@ export default function OrderReviewPage() {
           <div className="check">✓</div>
           <h1>ส่งคำสั่งซื้อเรียบร้อยแล้ว</h1>
           {tableLabel && <p><strong>โต๊ะ {tableLabel}</strong></p>}
-          <p className="muted">เลขที่ออเดอร์ {done.orderId}</p>
+          <p className="muted">ออเดอร์ {done.orderId}</p>
           <p>ยอดรวม <strong>{formatBaht(done.total)}</strong></p>
           <p className="muted">ร้านได้รับออเดอร์ของคุณแล้ว กรุณารอพนักงานดำเนินการ</p>
           <button className="primary" onClick={() => navigate('/')}>สั่งเพิ่ม</button>
+          <Link to="/orders" className="secondary">ดูสถานะออเดอร์ / เช็คบิล</Link>
         </main>
       </div>
     )
@@ -98,7 +116,7 @@ export default function OrderReviewPage() {
         {message && <div className="notice" role="alert">{message}</div>}
         {unavailable.length > 0 && (
           <div className="notice error">
-            มีสินค้าไม่พร้อมจำหน่าย: {unavailable.map((l) => l.product.name).join(', ')} — กรุณาลบออกจากตะกร้า
+            มีสินค้าไม่พร้อมจำหน่าย: {unavailable.map((l) => l.product.name).join(', ')} — กรุณาลบรายการที่มีข้อความสีแดงกำกับออกจากตะกร้าก่อนยืนยัน
             <Link to="/cart"> แก้ไขตะกร้า</Link>
           </div>
         )}
@@ -111,10 +129,19 @@ export default function OrderReviewPage() {
             </thead>
             <tbody>
               {lines.map((l) => (
-                <tr key={l.product.id}>
-                  <td>{l.product.name}</td>
+                <tr key={l.key}>
+                  <td>
+                    {l.product.name}
+                    {l.options.length > 0 && <div className="muted">{describeOptions(l)}</div>}
+                    {l.note && <div className="muted">หมายเหตุ: {l.note}</div>}
+                    {!l.product.is_available && (
+                      <div className="line-invalid" style={{ color: '#c0392b' }}>
+                        {invalidReasonText[l.invalidReason ?? 'product']}
+                      </div>
+                    )}
+                  </td>
                   <td>{l.quantity}</td>
-                  <td>{formatBaht(l.product.price)}</td>
+                  <td>{formatBaht(unitPrice(l))}</td>
                   <td>{formatBaht(lineTotal(l))}</td>
                 </tr>
               ))}

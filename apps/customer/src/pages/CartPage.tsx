@@ -18,7 +18,7 @@ export default function CartPage() {
           <div className="state">ตะกร้าว่าง — <Link to="/">เลือกอาหาร</Link></div>
         ) : (
           <ul className="cart-list">
-            {lines.map((l) => <CartItem key={l.product.id} line={l} />)}
+            {lines.map((l) => <CartItem key={l.key} line={l} />)}
           </ul>
         )}
       </main>

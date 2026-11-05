@@ -46,3 +46,26 @@ h1 { margin:0 0 16px; font-size:1.4rem; } h2 { margin:0 0 10px; font-size:1.05re
 .img-row { display:flex; gap:12px; align-items:center; } .img-row img, .img-empty { width:84px; height:84px; border-radius:10px; object-fit:cover; background:#e8eded; display:grid; place-items:center; color:var(--muted); font-size:.8rem; flex:none; }
 .img-row > div { display:grid; gap:6px; }
 .modal-actions { display:flex; gap:8px; align-items:center; margin-top:4px; }
+
+/* ออเดอร์ใหม่: ขอบล่างหยักฟันปลาเหมือนบิลที่ฉีกออกมา */
+.order.ticket { position: relative; margin-bottom: 22px; border-bottom-left-radius: 0; border-bottom-right-radius: 0; box-shadow: none; filter: drop-shadow(0 1px 1px rgba(0,0,0,.14)); }
+.order.ticket::after {
+  content: ''; position: absolute; left: 0; right: 0; top: calc(100% - 1px); height: 9px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='9' viewBox='0 0 16 9'%3E%3Cpolygon points='0,0 16,0 8,9' fill='%23fff'/%3E%3C/svg%3E") repeat-x left top / 16px 9px;
+}
+
+/* ---------- ชุดตัวเลือก (หลังร้าน) ---------- */
+.og-list { list-style:none; margin:0 0 20px; padding:0; background:#fff; border-radius:12px; }
+.og-list li { display:flex; gap:12px; align-items:flex-start; padding:12px 16px; border-bottom:1px solid var(--line); }
+.og-list li:last-child { border:0; } .og-list .ghost { margin:0; }
+.og-opts { display:flex; flex-wrap:wrap; gap:4px 12px; margin-top:4px; font-size:.9rem; }
+.og-opts .off { color:var(--muted); text-decoration:line-through; }
+.og-row { display:grid; grid-template-columns:1fr 90px auto auto; gap:8px; align-items:center; }
+.og-row .switch { font-size:.85rem; font-weight:400; white-space:nowrap; }
+.og-row .ghost { margin:0; padding:6px 10px; }
+.og-check { display:grid; gap:6px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; }
+.og-check label.switch { font-weight:400; }
+
+/* รายละเอียดตัวเลือก/หมายเหตุใต้ชื่อเมนูในออเดอร์และบิล */
+.item-opts { font-size:.82rem; color:var(--muted); }
+.item-note { font-size:.85rem; font-weight:600; color:#8a4b00; }

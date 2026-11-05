@@ -1,58 +1,71 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { isMockMode, supabase } from '../services/supabaseClient'
+import { ApiError } from '@yanta/shared'
+import { fetchMe, type Me } from '../services/staffService'
+import { supabase } from '../services/supabaseClient'
 
 interface Value {
   loading: boolean
   signedIn: boolean
+  me: Me | null
+  can: (permission: string) => boolean
   signIn: (email: string, password: string) => Promise<string | null>
   signOut: () => Promise<void>
 }
 
 const Ctx = createContext<Value | null>(null)
 
-/** ตรวจว่าผู้ใช้ที่ล็อกอินอยู่ในตาราง staff_users จริง (ฝั่งเซิร์ฟเวอร์) */
-async function isStaff(): Promise<boolean> {
-  const { data, error } = await supabase!.rpc('is_staff')
-  return !error && data === true
+/** ถามสิทธิ์จาก Backend: คืน null ถ้าไม่ใช่พนักงาน (403) */
+async function loadMe(): Promise<Me | null> {
+  try {
+    return await fetchMe()
+  } catch (e) {
+    if (e instanceof ApiError && (e.status === 401 || e.status === 403)) return null
+    throw e
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [loading, setLoading] = useState(!isMockMode)
-  const [signedIn, setSignedIn] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [me, setMe] = useState<Me | null>(null)
 
   useEffect(() => {
-    if (!supabase) return
-    supabase.auth.getSession().then(async ({ data }) => {
-      setSignedIn(!!data.session && (await isStaff()))
-      setLoading(false)
-    })
+    if (!supabase) return setLoading(false)
+    supabase.auth.getSession()
+      .then(async ({ data }) => setMe(data.session ? await loadMe() : null))
+      .catch(() => setMe(null))
+      .finally(() => setLoading(false))
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      if (!session) setSignedIn(false)
+      if (!session) setMe(null)
     })
     return () => sub.subscription.unsubscribe()
   }, [])
 
   const signIn: Value['signIn'] = async (email, password) => {
-    if (!supabase) {
-      setSignedIn(true)
-      return null
-    }
+    if (!supabase) return 'ยังไม่ได้ตั้งค่า Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)'
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) return 'อีเมลหรือรหัสผ่านไม่ถูกต้อง'
-    if (!(await isStaff())) {
+    try {
+      const profile = await loadMe()
+      if (!profile) {
+        await supabase.auth.signOut()
+        return 'บัญชีนี้ไม่มีสิทธิ์เข้าใช้งานฝั่งร้าน'
+      }
+      setMe(profile)
+      return null
+    } catch {
       await supabase.auth.signOut()
-      return 'บัญชีนี้ไม่มีสิทธิ์เข้าใช้งานฝั่งร้าน'
+      return 'เชื่อมต่อ Backend ไม่ได้ กรุณาตรวจสอบว่าเปิด YantaBackEnd อยู่'
     }
-    setSignedIn(true)
-    return null
   }
 
   const signOut = async () => {
     await supabase?.auth.signOut()
-    setSignedIn(false)
+    setMe(null)
   }
 
-  return <Ctx.Provider value={{ loading, signedIn, signIn, signOut }}>{children}</Ctx.Provider>
+  const can = (permission: string) => !!me && (me.isAdmin || me.permissions.includes(permission))
+
+  return <Ctx.Provider value={{ loading, signedIn: !!me, me, can, signIn, signOut }}>{children}</Ctx.Provider>
 }
 
 export function useAuth() {

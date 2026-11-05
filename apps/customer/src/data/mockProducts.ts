@@ -1,22 +1,30 @@
-import type { Product } from '../types'
+import type { Category, Product } from '../types'
 
 const p = (
   id: string,
-  category: Product['category'],
+  categoryId: string,
   name: string,
   description: string,
   price: number,
   image: string | null,
-  is_available = true,
+  isAvailable = true,
 ): Product => ({
   id,
-  category,
+  category: categoryId,
   name,
   description,
   price,
   image_url: image ? `/images/${image}` : null,
-  is_available,
+  is_available: isAvailable,
+  option_groups: [],
 })
+
+export const MOCK_CATEGORIES: Category[] = [
+  { id: 'congee', name: 'ข้าวต้ม' },
+  { id: 'breakfast', name: 'อาหารเช้า' },
+  { id: 'milk-tea', name: 'ชา นม และโกโก้' },
+  { id: 'coffee', name: 'กาแฟ' },
+]
 
 // ข้อมูลตัวอย่างสำหรับ mock mode (เมื่อยังไม่ได้ตั้งค่า Supabase)
 export const MOCK_PRODUCTS: Product[] = [
